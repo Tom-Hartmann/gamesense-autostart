@@ -10,11 +10,23 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
-
+//#define DEBUG
 namespace fs = std::filesystem;
 
 std::map<DWORD, int> foundProcesses;
 std::wstring loaderPath; // Use wstring for paths
+
+void CreateConsole()
+{
+    AllocConsole();
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD dwMode = 0;
+    GetConsoleMode(hOut, &dwMode);
+    dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+    SetConsoleMode(hOut, dwMode);
+    FILE* stream = nullptr;
+    freopen_s(&stream, "CONOUT$", "w", stdout);
+}
 
 bool IsRunningAsAdmin() {
     BOOL fIsElevated = FALSE;
@@ -163,13 +175,13 @@ void RunLoader(DWORD processID, int loadValue) {
         bool success = false;
         int attempts = 0;
         while (!success && attempts < 3) { // Retry up to 3 times
-            if (CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, pathWithoutQuotes.c_str(), &si, &pi)) {
+            if (CreateProcessW(NULL, cmd, NULL, NULL, FALSE, CREATE_NEW_PROCESS_GROUP, NULL, pathWithoutQuotes.c_str(), &si, &pi)) {
                 std::wcout << L"CreateProcessW succeeded." << std::endl;
                 success = true;
             }
             else {
                 std::wcout << L"CreateProcessW failed (" << GetLastError() << L"), retrying in 3 seconds..." << std::endl;
-                std::this_thread::sleep_for(std::chrono::seconds(3)); // Wait for 3 seconds before retrying
+                std::this_thread::sleep_for(std::chrono::seconds(3));
                 ++attempts;
             }
         }
@@ -191,8 +203,10 @@ void RunLoader(DWORD processID, int loadValue) {
     }
 }
 
-
-int main() {
+int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine, _In_ int nCmdShow) {
+#ifdef DEBUG
+    CreateConsole();
+#endif
     if (!IsRunningAsAdmin()) {
         PromptForAdminRights();
         return 1; //Exit if no admin perms
