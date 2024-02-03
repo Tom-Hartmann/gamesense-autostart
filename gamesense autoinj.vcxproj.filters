@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="entry.cpp">
+    <ClCompile Include="gamesense autostart.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
