@@ -20,6 +20,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="config.ini" />
+    <None Include=".gitignore" />
   </ItemGroup>
 </Project>
