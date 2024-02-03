@@ -9,13 +9,37 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 
 namespace fs = std::filesystem;
 
 std::map<DWORD, int> foundProcesses;
 std::wstring loaderPath; // Use wstring for paths
 
-std::wstring ReadConfig(const std::wstring& filename) { // Use wstring for filenames
+bool IsRunningAsAdmin() {
+    BOOL fIsElevated = FALSE;
+    HANDLE hToken = NULL;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+        TOKEN_ELEVATION Elevation;
+        DWORD dwSize;
+        if (GetTokenInformation(hToken, TokenElevation, &Elevation, sizeof(Elevation), &dwSize)) {
+            fIsElevated = Elevation.TokenIsElevated;
+        }
+    }
+    if (hToken) {
+        CloseHandle(hToken);
+    }
+    return fIsElevated;
+}
+
+void PromptForAdminRights() {
+    MessageBox(NULL,
+        L"This application requires elevated privileges to function correctly. Please restart it as an administrator.",
+        L"Administrator Rights Required",
+        MB_OK | MB_ICONEXCLAMATION);
+}
+
+std::wstring ReadConfig(const std::wstring& filename) {
     std::wifstream file(filename);
     std::wstring line;
     if (file.is_open()) {
@@ -132,30 +156,33 @@ void RunLoader(DWORD processID, int loadValue) {
         std::wstring command = L"\"" + exePath + L"\" --pid=" + std::to_wstring(processID) + L" --load=" + std::to_wstring(loadValue);
         std::wcout << L"Executing command: " << command << std::endl;
 
-        // Convert command to LPWSTR (non-const wchar_t*)
         wchar_t* cmd = new wchar_t[command.size() + 1];
         std::copy(command.begin(), command.end(), cmd);
         cmd[command.size()] = L'\0';
 
-        // Start the child process with the specified working directory
-        if (!CreateProcessW(NULL,   // No module name (use command line)
-            cmd,                   // Command line
-            NULL,                  // Process handle not inheritable
-            NULL,                  // Thread handle not inheritable
-            FALSE,                 // Set handle inheritance to FALSE
-            0,                     // No creation flags
-            NULL,                  // Use parent's environment block
-            pathWithoutQuotes.c_str(), // Set working directory
-            &si,                   // Pointer to STARTUPINFO structure
-            &pi)                   // Pointer to PROCESS_INFORMATION structure
-            )
-        {
-            std::wcout << L"CreateProcessW failed (" << GetLastError() << L")" << std::endl;
+        bool success = false;
+        int attempts = 0;
+        while (!success && attempts < 3) { // Retry up to 3 times
+            if (CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, pathWithoutQuotes.c_str(), &si, &pi)) {
+                std::wcout << L"CreateProcessW succeeded." << std::endl;
+                success = true;
+            }
+            else {
+                std::wcout << L"CreateProcessW failed (" << GetLastError() << L"), retrying in 3 seconds..." << std::endl;
+                std::this_thread::sleep_for(std::chrono::seconds(3)); // Wait for 3 seconds before retrying
+                ++attempts;
+            }
         }
 
-        // Close process and thread handles
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
+        if (!success) {
+            std::wcerr << L"Failed to create process after multiple attempts." << std::endl;
+        }
+
+        // Close process and thread handles if they were opened
+        if (success) {
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+        }
 
         delete[] cmd;
     }
@@ -164,8 +191,14 @@ void RunLoader(DWORD processID, int loadValue) {
     }
 }
 
+
 int main() {
-    std::wcout << L"Starting program..." << std::endl;
+    if (!IsRunningAsAdmin()) {
+        PromptForAdminRights();
+        return 1; //Exit if no admin perms
+    }
+
+    std::wcout << L"Running with elevated privileges." << std::endl;
 
     loaderPath = ReadConfig(L"config.ini");
     if (loaderPath.empty()) {
