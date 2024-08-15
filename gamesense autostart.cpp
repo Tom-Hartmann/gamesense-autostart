@@ -10,12 +10,16 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
-//#define DEBUG
+#define DEBUG
 namespace fs = std::filesystem;
 
 std::map<DWORD, int> foundProcesses;
-std::wstring loaderPath; // Use wstring for paths
 
+// Paths for the CS2 and CSGO loaders
+std::wstring loaderPathCS2;
+std::wstring loaderPathCSGO;
+
+// Function to create a console window for debugging output
 void CreateConsole()
 {
     AllocConsole();
@@ -25,9 +29,10 @@ void CreateConsole()
     dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
     SetConsoleMode(hOut, dwMode);
     FILE* stream = nullptr;
-    freopen_s(&stream, "CONOUT$", "w", stdout);
+    freopen_s(&stream, "CONOUT$", "w", stdout); // Redirect stdout to the console
 }
 
+// Function to check if the program is running with administrative privileges
 bool IsRunningAsAdmin() {
     BOOL fIsElevated = FALSE;
     HANDLE hToken = NULL;
@@ -44,6 +49,7 @@ bool IsRunningAsAdmin() {
     return fIsElevated;
 }
 
+// Function to prompt the user to restart the program with administrative rights
 void PromptForAdminRights() {
     MessageBox(NULL,
         L"This application requires elevated privileges to function correctly. Please restart it as an administrator.",
@@ -51,20 +57,21 @@ void PromptForAdminRights() {
         MB_OK | MB_ICONEXCLAMATION);
 }
 
-std::wstring ReadConfig(const std::wstring& filename) {
+// Function to read config value 
+std::wstring ReadConfig(const std::wstring& filename, const std::wstring& key) {
     std::wifstream file(filename);
     std::wstring line;
     if (file.is_open()) {
         while (std::getline(file, line)) {
             std::wistringstream is_line(line);
-            std::wstring key;
-            if (std::getline(is_line, key, L'=')) {
+            std::wstring fileKey;
+            if (std::getline(is_line, fileKey, L'=')) {
                 std::wstring value;
                 if (std::getline(is_line, value)) {
-                    if (key == L"path") {
-                        value.erase(std::remove(value.begin(), value.end(), L'\"'), value.end());
+                    if (fileKey == key) {
+                        value.erase(std::remove(value.begin(), value.end(), L'\"'), value.end()); 
                         if (!value.empty() && value.back() != L'\\') {
-                            value += L'\\';
+                            value += L'\\'; 
                         }
 
                         std::wcout << L"Config read: " << value << std::endl;
@@ -81,11 +88,12 @@ std::wstring ReadConfig(const std::wstring& filename) {
     return L"";
 }
 
+// Function to find the process ID of a running application
 DWORD FindProcessId(const std::wstring& processName) {
     PROCESSENTRY32 processInfo;
     processInfo.dwSize = sizeof(processInfo);
 
-    HANDLE processesSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, NULL);
+    HANDLE processesSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, NULL); // Take a snapshot of all running processes
     if (processesSnapshot == INVALID_HANDLE_VALUE) {
         std::wcout << L"Failed to create snapshot of processes." << std::endl;
         return 0;
@@ -102,37 +110,15 @@ DWORD FindProcessId(const std::wstring& processName) {
         } while (Process32Next(processesSnapshot, &processInfo));
     }
 
-    CloseHandle(processesSnapshot);
+    CloseHandle(processesSnapshot); // Clean up snapshot handle
     return processID;
 }
 
-void RenameRandomExe(const std::wstring& directoryPathStr) {
-    std::wstring pathWithoutQuotes = directoryPathStr;
-    pathWithoutQuotes.erase(std::remove(pathWithoutQuotes.begin(), pathWithoutQuotes.end(), L'\"'), pathWithoutQuotes.end());
-
-    fs::path directoryPath = fs::path(pathWithoutQuotes);
-
-    std::wcout << L"Renaming first .exe in directory: " << directoryPath << std::endl;
-
-    try {
-        for (const auto& entry : fs::directory_iterator(directoryPath)) {
-            if (entry.is_regular_file() && entry.path().extension() == L".exe") {
-                fs::path newFileName = directoryPath / L"loader.exe";
-                std::wcout << L"Renaming " << entry.path() << L" to " << newFileName << std::endl;
-                fs::rename(entry.path(), newFileName);
-                break;
-            }
-        }
-    }
-    catch (const fs::filesystem_error& e) {
-        std::wcerr << L"Filesystem error: " << e.what() << std::endl;
-    }
-}
-
-void RunLoader(DWORD processID, int loadValue) {
+// Function to run the loader for a specific process ID and load value
+void RunLoader(DWORD processID, int loadValue, const std::wstring& loaderPath) {
     std::wcout << L"Preparing to run loader with PID " << processID << L" and load value " << loadValue << std::endl;
 
-    // Remove quotes and ensure the path ends with a backslash
+    // Clean up the loader path and ensure it ends with a backslash
     std::wstring pathWithoutQuotes = loaderPath;
     pathWithoutQuotes.erase(std::remove(pathWithoutQuotes.begin(), pathWithoutQuotes.end(), L'\"'), pathWithoutQuotes.end());
     if (!pathWithoutQuotes.empty() && pathWithoutQuotes.back() != L'\\') {
@@ -164,7 +150,7 @@ void RunLoader(DWORD processID, int loadValue) {
         si.cb = sizeof(si);
         ZeroMemory(&pi, sizeof(pi));
 
-        // Construct the command
+        // Construct the command to run the loader
         std::wstring command = L"\"" + exePath + L"\" --pid=" + std::to_wstring(processID) + L" --load=" + std::to_wstring(loadValue);
         std::wcout << L"Executing command: " << command << std::endl;
 
@@ -174,7 +160,7 @@ void RunLoader(DWORD processID, int loadValue) {
 
         bool success = false;
         int attempts = 0;
-        while (!success && attempts < 3) { // Retry up to 3 times
+        while (!success && attempts < 3) { // Retry up to 3 times if the loader fails to start
             if (CreateProcessW(NULL, cmd, NULL, NULL, FALSE, CREATE_NEW_PROCESS_GROUP, NULL, pathWithoutQuotes.c_str(), &si, &pi)) {
                 std::wcout << L"CreateProcessW succeeded." << std::endl;
                 success = true;
@@ -190,7 +176,6 @@ void RunLoader(DWORD processID, int loadValue) {
             std::wcerr << L"Failed to create process after multiple attempts." << std::endl;
         }
 
-        // Close process and thread handles if they were opened
         if (success) {
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
@@ -203,40 +188,55 @@ void RunLoader(DWORD processID, int loadValue) {
     }
 }
 
+// Main function, entry point
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine, _In_ int nCmdShow) {
 #ifdef DEBUG
-    CreateConsole();
+    CreateConsole(); // Create a console for debugging output if DEBUG is defined
 #endif
-    if (!IsRunningAsAdmin()) {
-        PromptForAdminRights();
-        return 1; //Exit if no admin perms
+    if (!IsRunningAsAdmin()) { // Check if the program is running with admin rights
+        PromptForAdminRights(); // Prompt the user to run the program as an administrator
+        return 1; // Exit the program if not running as admin
     }
 
     std::wcout << L"Running with elevated privileges." << std::endl;
 
-    loaderPath = ReadConfig(L"config.ini");
-    if (loaderPath.empty()) {
-        std::wcerr << L"Loader path not found in config.ini" << std::endl;
+    // Read paths from the config file
+    loaderPathCS2 = ReadConfig(L"config.ini", L"pathcs2");
+    loaderPathCSGO = ReadConfig(L"config.ini", L"pathcsgo");
+
+    if (loaderPathCS2.empty()) {
+        std::wcerr << L"Loader path for CS2 not found in config.ini" << std::endl;
         return 1;
     }
 
+    if (!loaderPathCSGO.empty() && loaderPathCS2 == loaderPathCSGO) {
+        std::wcerr << L"Error: pathcs2 and pathcsgo cannot be the same." << std::endl;
+        return 1;
+    }
+
+    // Main loop to monitor processes and run loaders
     while (true) {
-        DWORD csgoID = FindProcessId(L"csgo.exe");
-        if (csgoID) {
-            foundProcesses[csgoID] = 1;
-            RunLoader(csgoID, 1);
+        // Check for CSGO process if pathcsgo is provided
+        if (!loaderPathCSGO.empty()) {
+            DWORD csgoID = FindProcessId(L"csgo.exe");
+            if (csgoID) {
+                foundProcesses[csgoID] = 1;
+                RunLoader(csgoID, 1, loaderPathCSGO);
+            }
         }
 
+        // Check for CS2 process
         DWORD cs2ID = FindProcessId(L"cs2.exe");
         if (cs2ID) {
             foundProcesses[cs2ID] = 1;
-            RunLoader(cs2ID, 128);
+            RunLoader(cs2ID, 128, loaderPathCS2);
         }
 
+        // Check for Rust process
         DWORD rustID = FindProcessId(L"rust.exe");
         if (rustID) {
             foundProcesses[rustID] = 1;
-            RunLoader(rustID, 16);
+            RunLoader(rustID, 16, loaderPathCS2); //assuming this still exists lol
         }
 
         std::this_thread::sleep_for(std::chrono::seconds(3));
