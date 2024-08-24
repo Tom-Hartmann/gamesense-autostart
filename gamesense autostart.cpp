@@ -7,8 +7,6 @@
 #include <map>
 #include <thread>
 #include <string>
-#include <fstream>
-#include <sstream>
 #include <algorithm>
 #define DEBUG
 namespace fs = std::filesystem;
@@ -57,6 +55,20 @@ void PromptForAdminRights() {
         MB_OK | MB_ICONEXCLAMATION);
 }
 
+// Function to create the default config.ini file
+void CreateDefaultConfig(const std::wstring& filename) {
+    std::wofstream file(filename);
+    if (file.is_open()) {
+        file << L"pathcs2=\"C:\\Path\\To\\CS2 Loader\\\"\n";
+        file << L"pathcsgo=\"C:\\Path\\To\\CSGO Loader\\\"\n";
+        file.close();
+        std::wcout << L"Created default config.ini file." << std::endl;
+    }
+    else {
+        std::wcerr << L"Failed to create default config.ini file." << std::endl;
+    }
+}
+
 // Function to read config value 
 std::wstring ReadConfig(const std::wstring& filename, const std::wstring& key) {
     std::wifstream file(filename);
@@ -69,9 +81,9 @@ std::wstring ReadConfig(const std::wstring& filename, const std::wstring& key) {
                 std::wstring value;
                 if (std::getline(is_line, value)) {
                     if (fileKey == key) {
-                        value.erase(std::remove(value.begin(), value.end(), L'\"'), value.end()); 
+                        value.erase(std::remove(value.begin(), value.end(), L'\"'), value.end());
                         if (!value.empty() && value.back() != L'\\') {
-                            value += L'\\'; 
+                            value += L'\\';
                         }
 
                         std::wcout << L"Config read: " << value << std::endl;
@@ -200,16 +212,39 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 
     std::wcout << L"Running with elevated privileges." << std::endl;
 
-    // Read paths from the config file
-    loaderPathCS2 = ReadConfig(L"config.ini", L"pathcs2");
-    loaderPathCSGO = ReadConfig(L"config.ini", L"pathcsgo");
+    const std::wstring configFilename = L"config.ini";
 
-    if (loaderPathCS2.empty()) {
-        std::wcerr << L"Loader path for CS2 not found in config.ini" << std::endl;
+    // Check if the config.ini file exists, if not, create it
+    if (!fs::exists(configFilename)) {
+        std::wcout << L"config.ini not found, creating default config.ini..." << std::endl;
+        CreateDefaultConfig(configFilename);
+        MessageBox(NULL,
+            L"The config.ini was not found and has been created with default values. Please configure at least one path (CSGO or CS2).",
+            L"Configuration Required",
+            MB_OK | MB_ICONEXCLAMATION);
         return 1;
     }
 
-    if (!loaderPathCSGO.empty() && loaderPathCS2 == loaderPathCSGO) {
+    // Read paths from the config file
+    loaderPathCS2 = ReadConfig(configFilename, L"pathcs2");
+    loaderPathCSGO = ReadConfig(configFilename, L"pathcsgo");
+
+    // Default paths to check against
+    std::wstring defaultCS2Path = L"C:\\Path\\To\\CS2 Loader\\";
+    std::wstring defaultCSGOPath = L"C:\\Path\\To\\CSGO Loader\\";
+
+    // Check if both paths are default or empty
+    if ((loaderPathCS2.empty() || loaderPathCS2 == defaultCS2Path) &&
+        (loaderPathCSGO.empty() || loaderPathCSGO == defaultCSGOPath)) {
+        MessageBox(NULL,
+            L"The config.ini is not set up. Please configure at least one path (CSGO or CS2).",
+            L"Configuration Required",
+            MB_OK | MB_ICONEXCLAMATION);
+        return 1;
+    }
+
+    // Check if both paths are provided and are the same
+    if (!loaderPathCSGO.empty() && !loaderPathCS2.empty() && loaderPathCS2 == loaderPathCSGO) {
         std::wcerr << L"Error: pathcs2 and pathcsgo cannot be the same." << std::endl;
         return 1;
     }
@@ -217,7 +252,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
     // Main loop to monitor processes and run loaders
     while (true) {
         // Check for CSGO process if pathcsgo is provided
-        if (!loaderPathCSGO.empty()) {
+        if (!loaderPathCSGO.empty() && loaderPathCSGO != defaultCSGOPath) {
             DWORD csgoID = FindProcessId(L"csgo.exe");
             if (csgoID) {
                 foundProcesses[csgoID] = 1;
@@ -225,18 +260,22 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
             }
         }
 
-        // Check for CS2 process
-        DWORD cs2ID = FindProcessId(L"cs2.exe");
-        if (cs2ID) {
-            foundProcesses[cs2ID] = 1;
-            RunLoader(cs2ID, 128, loaderPathCS2);
+        // Check for CS2 process if pathcs2 is provided
+        if (!loaderPathCS2.empty() && loaderPathCS2 != defaultCS2Path) {
+            DWORD cs2ID = FindProcessId(L"cs2.exe");
+            if (cs2ID) {
+                foundProcesses[cs2ID] = 1;
+                RunLoader(cs2ID, 128, loaderPathCS2);
+            }
         }
 
-        // Check for Rust process
-        DWORD rustID = FindProcessId(L"rust.exe");
-        if (rustID) {
-            foundProcesses[rustID] = 1;
-            RunLoader(rustID, 16, loaderPathCS2); //assuming this still exists lol
+        // Check for Rust process if pathcs2 is provided
+        if (!loaderPathCS2.empty() && loaderPathCS2 != defaultCS2Path) {
+            DWORD rustID = FindProcessId(L"rust.exe");
+            if (rustID) {
+                foundProcesses[rustID] = 1;
+                RunLoader(rustID, 16, loaderPathCS2);
+            }
         }
 
         std::this_thread::sleep_for(std::chrono::seconds(3));
