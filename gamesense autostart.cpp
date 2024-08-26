@@ -8,7 +8,7 @@
 #include <thread>
 #include <string>
 #include <algorithm>
-#define DEBUG
+
 namespace fs = std::filesystem;
 
 std::map<DWORD, int> foundProcesses;
