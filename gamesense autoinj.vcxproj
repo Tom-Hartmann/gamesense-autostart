@@ -138,6 +138,7 @@
     <ClCompile Include="gamesense autostart.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include=".gitignore" />
     <None Include="config.ini" />
   </ItemGroup>
   <ItemGroup>
