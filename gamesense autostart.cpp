@@ -61,6 +61,7 @@ void CreateDefaultConfig(const std::wstring& filename) {
     if (file.is_open()) {
         file << L"pathcs2=\"C:\\Path\\To\\CS2 Loader\\\"\n";
         file << L"pathcsgo=\"C:\\Path\\To\\CSGO Loader\\\"\n";
+        file << L"console=false\n";
         file.close();
         std::wcout << L"Created default config.ini file." << std::endl;
     }
@@ -68,6 +69,7 @@ void CreateDefaultConfig(const std::wstring& filename) {
         std::wcerr << L"Failed to create default config.ini file." << std::endl;
     }
 }
+
 
 // Function to read config value 
 std::wstring ReadConfig(const std::wstring& filename, const std::wstring& key) {
@@ -99,6 +101,30 @@ std::wstring ReadConfig(const std::wstring& filename, const std::wstring& key) {
     }
     return L"";
 }
+
+bool ReadBoolConfig(const std::wstring& filename, const std::wstring& key) {
+    std::wifstream file(filename);
+    std::wstring line;
+    if (file.is_open()) {
+        while (std::getline(file, line)) {
+            std::wistringstream is_line(line);
+            std::wstring fileKey;
+            if (std::getline(is_line, fileKey, L'=')) {
+                std::wstring value;
+                if (std::getline(is_line, value)) {
+                    if (fileKey == key) {
+                        std::transform(value.begin(), value.end(), value.begin(), ::towlower);
+                        value.erase(std::remove(value.begin(), value.end(), L'\"'), value.end());
+                        return value == L"true";
+                    }
+                }
+            }
+        }
+        file.close();
+    }
+    return false; // Default to false if not found or error
+}
+
 
 // Function to find the process ID of a running application
 DWORD FindProcessId(const std::wstring& processName) {
@@ -202,17 +228,31 @@ void RunLoader(DWORD processID, int loadValue, const std::wstring& loaderPath) {
 
 // Main function, entry point
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine, _In_ int nCmdShow) {
-#ifdef DEBUG
-    CreateConsole(); // Create a console for debugging output if DEBUG is defined
-#endif
-    if (!IsRunningAsAdmin()) { // Check if the program is running with admin rights
-        PromptForAdminRights(); // Prompt the user to run the program as an administrator
-        return 1; // Exit the program if not running as admin
+    const std::wstring configFilename = L"config.ini";
+
+    // Check if the config.ini file exists, if not, create it
+    if (!fs::exists(configFilename)) {
+        std::wcout << L"config.ini not found, creating default config.ini..." << std::endl;
+        CreateDefaultConfig(configFilename);
+        MessageBox(NULL,
+            L"The config.ini was not found and has been created with default values. Please configure at least one path (CSGO or CS2).",
+            L"Configuration Required",
+            MB_OK | MB_ICONEXCLAMATION);
+        return 1;
+    }
+
+    // Read console config option
+    bool useConsole = ReadBoolConfig(configFilename, L"console");
+    if (useConsole) {
+        CreateConsole(); // Always create console if enabled in config
+    }
+
+    if (!IsRunningAsAdmin()) {
+        PromptForAdminRights();
+        return 1;
     }
 
     std::wcout << L"Running with elevated privileges." << std::endl;
-
-    const std::wstring configFilename = L"config.ini";
 
     // Check if the config.ini file exists, if not, create it
     if (!fs::exists(configFilename)) {
@@ -268,16 +308,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
                 RunLoader(cs2ID, 128, loaderPathCS2);
             }
         }
-
-        // Check for Rust process if pathcs2 is provided
-        if (!loaderPathCS2.empty() && loaderPathCS2 != defaultCS2Path) {
-            DWORD rustID = FindProcessId(L"rust.exe");
-            if (rustID) {
-                foundProcesses[rustID] = 1;
-                RunLoader(rustID, 16, loaderPathCS2);
-            }
-        }
-
         std::this_thread::sleep_for(std::chrono::seconds(3));
     }
 
