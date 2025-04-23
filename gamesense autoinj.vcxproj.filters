@@ -21,6 +21,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="config.ini" />
+    <None Include=".gitignore" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="forumpost.txt" />
